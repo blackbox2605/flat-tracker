@@ -1,0 +1,8 @@
+# streamlit
+# pymongo[srv]
+# pandas
+# python-dotenv
+
+streamlit
+pymongo
+python-dotenv
