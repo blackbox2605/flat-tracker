@@ -1,46 +1,63 @@
-# # utils/db.py
+# utils/db.py
+
+import os
 from pymongo import MongoClient
 from bson import ObjectId
 import streamlit as st
 from datetime import datetime
 
-# -----------------------------
-# DB Initialization
-# -----------------------------
+
+# ---------------------------------------------------------
+# LOW-LEVEL DB ACCESS (FOR INTERNAL USE)
+# ---------------------------------------------------------
+def get_db():
+    """Returns a DB instance using environment variable MONGO_URL."""
+    mongo_url = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
+    client = MongoClient(mongo_url)
+    return client["flat_tracker"]
+
+
+# ---------------------------------------------------------
+# STREAMLIT-SECRETS DB INITIALIZATION (YOUR ACTUAL MODE)
+# ---------------------------------------------------------
 def init_db():
     uri = st.secrets.get("mongodb_uri")
     if not uri:
         st.error("MongoDB URI not found in .streamlit/secrets.toml")
         st.stop()
+
     client = MongoClient(uri)
     return client["flat_tracker"]
 
-# Initialize DB once
+
+# Initialize DB only once
 if "db" not in st.session_state:
     st.session_state["db"] = init_db()
 
 db = st.session_state["db"]
 
-def get_db():
-    """Streamlit Cloud expects this function."""
-    return db
 
-# Collections
+# ---------------------------------------------------------
+# COLLECTIONS
+# ---------------------------------------------------------
 buildings_col = db.buildings
 flats_col = db.flats
 monthly_bills_col = db.monthly_bills
+advances_col = db.advances        # Advance installments stored here
 
 
-# -----------------------------
-# Building helpers
-# -----------------------------
+# ---------------------------------------------------------
+# BUILDING HELPERS
+# ---------------------------------------------------------
 def get_buildings():
     return list(buildings_col.find().sort("name", 1))
+
 
 def add_building(name, address=""):
     doc = {"name": name, "address": address, "created_at": datetime.utcnow().isoformat()}
     res = buildings_col.insert_one(doc)
     return str(res.inserted_id)
+
 
 def get_building(building_id):
     try:
@@ -49,35 +66,51 @@ def get_building(building_id):
         return None
 
 
-# -----------------------------
-# Flats helpers
-# -----------------------------
+# ---------------------------------------------------------
+# FLAT HELPERS
+# ---------------------------------------------------------
 def get_flats_by_building(building_id):
     return list(flats_col.find({"building_id": str(building_id)}).sort("flat_no", 1))
 
-def add_flat(building_id, flat_no, floor=None, bhk=None, base_rent=0.0, water_rate=None, tenant_name=None, move_in=None, phone=""):
+
+def add_flat(
+    building_id,
+    flat_no,
+    floor=None,
+    bhk=None,
+    base_rent=0.0,
+    water_rate=None,
+    tenant_name=None,
+    move_in=None,
+    phone="",
+    total_advance=0.0
+):
     flat_doc = {
         "building_id": str(building_id),
         "flat_no": str(flat_no),
         "floor": int(floor) if floor not in (None, "", False) else None,
         "bhk": int(bhk) if bhk not in (None, "", False) else None,
-        "base_rent": float(base_rent) if base_rent not in (None, "") else 0.0,
+        "base_rent": float(base_rent) if base_rent else 0.0,
         "water_rate_per_liter": float(water_rate) if water_rate not in (None, "") else None,
         "tenant_history": [],
+        "total_advance": float(total_advance),     # FIXED TOTAL ADVANCE
         "created_at": datetime.utcnow().isoformat(),
     }
+
     res = flats_col.insert_one(flat_doc)
     fid = str(res.inserted_id)
 
+    # Add tenant history entry if tenant exists
     if tenant_name and move_in:
         entry = {
             "tenant_name": tenant_name,
             "phone": phone or "",
             "move_in": move_in,
             "move_out": None,
-            "recorded_at": datetime.utcnow().isoformat()
+            "recorded_at": datetime.utcnow().isoformat(),
         }
         flats_col.update_one({"_id": ObjectId(fid)}, {"$push": {"tenant_history": entry}})
+
     return fid
 
 
@@ -97,28 +130,29 @@ def update_flat(flat_id, **kwargs):
     if update_doc:
         flats_col.update_one({"_id": ObjectId(flat_id)}, {"$set": update_doc})
 
-    # Auto sync to monthly summary
-    from datetime import datetime
-    curr_month, curr_year = datetime.now().month, datetime.now().year
-    building_id = kwargs.get("building_id") or flats_col.find_one({"_id": ObjectId(flat_id)})["building_id"]
+    # Sync monthly summary:
+    curr_month = datetime.now().month
+    curr_year = datetime.now().year
+    building_id = flats_col.find_one({"_id": ObjectId(flat_id)})["building_id"]
     update_flat_monthly_summary(flat_id, building_id, curr_month, curr_year)
 
 
 def delete_flat(flat_id):
     flats_col.delete_one({"_id": ObjectId(flat_id)})
     monthly_bills_col.delete_many({"flat_id": str(flat_id)})
+    advances_col.delete_many({"flat_id": str(flat_id)})
 
 
-# -----------------------------
-# Tenant history
-# -----------------------------
+# ---------------------------------------------------------
+# TENANT HELPERS
+# ---------------------------------------------------------
 def add_tenant_entry(flat_id, tenant_name, move_in, phone=""):
     entry = {
         "tenant_name": tenant_name,
         "phone": phone or "",
         "move_in": move_in,
         "move_out": None,
-        "recorded_at": datetime.utcnow().isoformat()
+        "recorded_at": datetime.utcnow().isoformat(),
     }
     flats_col.update_one({"_id": ObjectId(flat_id)}, {"$push": {"tenant_history": entry}})
 
@@ -130,8 +164,9 @@ def vacate_current_tenant(flat_id, move_out_date=None):
 
     hist = flat.get("tenant_history", []) or []
 
+    # Find last active tenant entry
     for i in range(len(hist) - 1, -1, -1):
-        if not hist[i].get("move_out"):
+        if hist[i].get("move_out") is None:
             hist[i]["move_out"] = move_out_date or datetime.utcnow().isoformat()
             break
 
@@ -142,11 +177,12 @@ def move_flat_to_history(flat_id):
     vacate_current_tenant(flat_id)
     flats_col.delete_one({"_id": ObjectId(flat_id)})
     monthly_bills_col.delete_many({"flat_id": str(flat_id)})
+    advances_col.delete_many({"flat_id": str(flat_id)})
 
 
-# -----------------------------
-# Billing helpers
-# -----------------------------
+# ---------------------------------------------------------
+# BILLING HELPERS
+# ---------------------------------------------------------
 def get_bill(flat_id, month, year):
     return monthly_bills_col.find_one({
         "flat_id": str(flat_id),
@@ -163,15 +199,10 @@ def save_bill(flat_id, building_id, month, year, bill_doc):
     )
 
 
-# -----------------------------
-# Monthly summary updater
-# -----------------------------
+# ---------------------------------------------------------
+# MONTHLY SUMMARY UPDATE
+# ---------------------------------------------------------
 def update_flat_monthly_summary(flat_id, building_id, month, year):
-    """
-    Recalculate and update derived fields for a bill (water_units, water_charge, subtotal, total_due).
-    This reads the saved monthly_bills_col document for the given flat/month/year and uses the
-    flat's water_rate_per_liter if available for water charge calculation if bill doesn't contain explicit rate.
-    """
     from utils.billing_utils import calc_water_charge, calc_total_payable
 
     bill = get_bill(flat_id, month, year)
@@ -182,10 +213,7 @@ def update_flat_monthly_summary(flat_id, building_id, month, year):
     if not flat:
         return
 
-    # Prefer water rate from bill if present, else use flat's stored water_rate_per_liter
-    rate_to_use = bill.get("water_rate")
-    if rate_to_use is None:
-        rate_to_use = flat.get("water_rate_per_liter", 0)
+    rate_to_use = bill.get("water_rate") or flat.get("water_rate_per_liter", 0)
 
     water_units, water_charge = calc_water_charge(
         bill.get("cold_prev", 0),
@@ -195,7 +223,6 @@ def update_flat_monthly_summary(flat_id, building_id, month, year):
         rate_to_use
     )
 
-    # include misc in subtotal if present
     misc_amount = float(bill.get("misc", 0) or 0)
 
     subtotal = calc_total_payable(
@@ -213,6 +240,44 @@ def update_flat_monthly_summary(flat_id, building_id, month, year):
             "water_units": water_units,
             "water_charge": water_charge,
             "subtotal": subtotal,
-            "total_due": total_due
+            "total_due": total_due,
         }}
     )
+
+
+# ---------------------------------------------------------
+# ADVANCE PAYMENT SYSTEM (FULLY FIXED)
+# ---------------------------------------------------------
+def add_advance_payment(flat_id, amount):
+    """Adds a new installment of advance paid."""
+    try:
+        amount = float(amount)
+    except:
+        return
+
+    if amount <= 0:
+        return
+
+    doc = {
+        "flat_id": str(flat_id),
+        "amount": amount,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    advances_col.insert_one(doc)
+
+
+def get_advance_summary(flat_id):
+    """Returns (total, paid, remaining)."""
+
+    flat = flats_col.find_one({"_id": ObjectId(flat_id)})
+    if not flat:
+        return 0, 0, 0
+
+    total_adv = float(flat.get("total_advance", 0))
+
+    payments = list(advances_col.find({"flat_id": str(flat_id)}))
+    paid = sum(float(p["amount"]) for p in payments)
+
+    remaining = max(total_adv - paid, 0)
+
+    return total_adv, paid, remaining

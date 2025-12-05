@@ -10,6 +10,8 @@ from utils.db import (
     add_tenant_entry,
     vacate_current_tenant,
     move_flat_to_history,
+    add_advance_payment,
+    get_advance_summary,
 )
 
 st.set_page_config(page_title="Flats - Flat Tracker")
@@ -27,8 +29,6 @@ if not building:
     st.stop()
 
 st.header(f"{building.get('name')}")
-
-# Navigation buttons
 colA, colB = st.columns(2)
 if colA.button("⬅ Back to Buildings"):
     st.switch_page("pages/1_Buildings.py")
@@ -47,10 +47,15 @@ with st.expander("➕ Add new flat"):
         water_rate = st.number_input("Water Rate (optional)", value=0.0)
         tenant_name = st.text_input("Initial Tenant Name")
         move_in = st.date_input("Move-in Date", value=datetime.today())
+
+        # New advance fields
+        total_advance = st.number_input("Total Advance", value=0.0)
+        initial_paid = st.number_input("Advance Paid Now", value=0.0)
+
         submit = st.form_submit_button("Create")
 
         if submit:
-            add_flat(
+            fid = add_flat(
                 building_id,
                 flat_no,
                 floor,
@@ -59,7 +64,12 @@ with st.expander("➕ Add new flat"):
                 water_rate if water_rate > 0 else None,
                 tenant_name if tenant_name else None,
                 move_in.isoformat() if tenant_name else None,
+                total_advance=total_advance,  # <-- ADDED
             )
+
+            if total_advance > 0 and initial_paid > 0:
+                add_advance_payment(fid, initial_paid)
+
             st.success("Flat created.")
             st.rerun()
 
@@ -82,6 +92,23 @@ else:
             header += f" — Tenant: {curr['tenant_name']}"
 
         with st.expander(header):
+
+            # Advance summary
+            total_adv, paid_adv, remaining_adv = get_advance_summary(fid)
+            st.markdown(
+                f"**Advance:** Total: ₹{total_adv:.2f} | Paid: ₹{paid_adv:.2f} | Remaining: ₹{remaining_adv:.2f}"
+            )
+
+            # Add new payment
+            with st.form(f"adv_{fid}"):
+                new_payment = st.number_input("Add Advance Payment", min_value=0.0, value=0.0)
+                ok = st.form_submit_button("Add Payment")
+                if ok and new_payment > 0:
+                    add_advance_payment(fid, new_payment)
+                    st.success("Payment added.")
+                    st.rerun()
+
+            # Edit section
             with st.form(f"edit_{fid}"):
                 new_rent = st.number_input("Base Rent", value=f.get("base_rent", 0.0))
                 new_rate = st.number_input("Water Rate", value=f.get("water_rate_per_liter") or 0.0)
@@ -97,9 +124,7 @@ else:
                 if submitted:
                     update_flat(fid, base_rent=new_rent, water_rate_per_liter=new_rate)
 
-                    # 🔥 Sync monthly summary for this flat (current month)
                     from utils.db import update_flat_monthly_summary
-                    from datetime import datetime
                     curr_month, curr_year = datetime.now().month, datetime.now().year
                     update_flat_monthly_summary(fid, building_id, curr_month, curr_year)
 
@@ -117,7 +142,6 @@ else:
                     st.success("Updated.")
                     st.rerun()
 
-
             col1, col2, col3 = st.columns(3)
 
             if col1.button("Open Billing", key=f"bl_{fid}"):
@@ -128,13 +152,7 @@ else:
                 st.session_state["selected_flat_id"] = fid
                 st.switch_page("pages/4_Tenant_History.py")
 
-            # if col3.button("Vacate", key=f"vac_{fid}"):
-            #     move_flat_to_history(fid)
-            #     st.success("Tenant moved to history & flat removed.")
-            #     st.rerun()
-
             if col3.button("Vacate", key=f"vac_{fid}"):
                 move_flat_to_history(fid)
                 st.success("Tenant moved to history.")
                 st.rerun()
-
