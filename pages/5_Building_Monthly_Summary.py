@@ -40,6 +40,49 @@ if not flats:
     st.info("No flats found.")
     st.stop()
 
+# -------------------------------------------------------------
+# FILTER: Show only flats that are occupied in the selected month/year
+# -------------------------------------------------------------
+filtered_flats = []
+
+for f in flats:
+    tenant_history = f.get("tenant_history", [])
+    if not tenant_history:
+        continue
+
+    # find latest active tenant (no move_out)
+    latest = next((t for t in reversed(tenant_history) if not t.get("move_out")), None)
+    if not latest:
+        continue
+
+    start = latest.get("move_in")
+    end   = latest.get("move_out")  # may be None
+
+    if not start:
+        continue
+
+    # Parse dates
+    start_dt = datetime.fromisoformat(start)
+    end_dt = datetime.fromisoformat(end) if end else None
+
+    # Check if active during selected month
+    is_active = (
+        (start_dt.year < year or (start_dt.year == year and start_dt.month <= month))
+        and
+        (
+            end_dt is None or
+            end_dt.year > year or
+            (end_dt.year == year and end_dt.month >= month)
+        )
+    )
+
+    if is_active:
+        filtered_flats.append(f)
+
+# Use filtered list instead of all flats
+flats = filtered_flats
+
+
 # Add an extra column for Misc
 col_widths = [1.2,1.4,1,1,1,1,1,1.2,1.2,1.2,1.0,1.2]  # added one width for misc (at index 10)
 headers = ["Flat","Tenant","Prev Cold","Curr Cold","Prev Hot","Curr Hot","Rate (₹/L)","Water ₹","Electricity ₹","Rent ₹","Misc ₹","Total Due ₹"]
