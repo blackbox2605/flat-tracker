@@ -98,6 +98,9 @@ rent = st.number_input(
 )
 electricity = st.number_input("Electricity", value=float(bill.get("electricity", 0)) if bill else 0.0)
 
+# --- Miscellaneous (single total misc field) ---
+misc = st.number_input("Miscellaneous (maintenance/parking/etc.)", value=float(bill.get("misc", 0)) if bill else 0.0)
+
 # -------------------------------------------------------------------
 # Previous carry-forward (unchanged logic)
 # -------------------------------------------------------------------
@@ -106,7 +109,7 @@ prev_bill = monthly_bills_col.find_one({"flat_id": selected_flat_id, "month": pm
 prev_carry = float(prev_bill.get("carry_forward", 0)) if prev_bill else 0.0
 st.write(f"Previous carry: ₹{prev_carry:.2f}")
 
-subtotal = calc_total_payable(rent, water_charge, electricity)
+subtotal = calc_total_payable(rent, water_charge, electricity, misc)
 total = subtotal + prev_carry
 st.write(f"Subtotal: ₹{subtotal:.2f}")
 st.write(f"Total due: ₹{total:.2f}")
@@ -123,48 +126,6 @@ st.write(f"Carry forward: ₹{carry:.2f}")
 # -------------------------------------------------------------------
 # Save
 # -------------------------------------------------------------------
-# if st.button("Save bill"):
-#     doc = {
-#         "flat_id": selected_flat_id,
-#         "building_id": building_id,
-#         "month": int(month),
-#         "year": int(year),
-
-#         "cold_prev": prev_cold,
-#         "cold_curr": curr_cold,
-#         "hot_prev": prev_hot,
-#         "hot_curr": curr_hot,
-
-#         "water_rate": rate,
-#         "water_units": water_units,
-#         "water_charge": water_charge,
-
-#         "rent": rent,
-#         "electricity": electricity,
-
-#         "subtotal": subtotal,
-#         "prev_carry": prev_carry,
-#         "total_due": total,
-
-#         "amount_paid": amount_paid,
-#         "pending": pending,
-#         "carry_forward": carry,
-
-#         "updated_at": datetime.utcnow().isoformat(),
-#     }
-#     monthly_bills_col.update_one(
-#         {"flat_id": selected_flat_id, "month": int(month), "year": int(year)},
-#         {"$set": doc},
-#         upsert=True
-#     )
-#     st.success("Saved!")
-#     st.rerun()
-
-
-
-
-
-# Save button
 if st.button("Save bill"):
     doc = {
         "flat_id": selected_flat_id,
@@ -184,6 +145,9 @@ if st.button("Save bill"):
         "rent": rent,
         "electricity": electricity,
 
+        # NEW: misc (single field)
+        "misc": float(misc),
+
         "subtotal": subtotal,
         "prev_carry": prev_carry,
         "total_due": total,
@@ -201,7 +165,7 @@ if st.button("Save bill"):
         upsert=True
     )
 
-    # 🔥 Sync monthly summary
+    # 🔥 Sync monthly summary (recalculate derived fields)
     from utils.db import update_flat_monthly_summary
     update_flat_monthly_summary(selected_flat_id, building_id, int(month), int(year))
 
