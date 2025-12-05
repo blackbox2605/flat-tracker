@@ -1,7 +1,7 @@
 # pages/1_Buildings.py
 import streamlit as st
 from utils.db import get_buildings, add_building, get_building, get_db
-
+from utils.db import delete_building   # ADD THIS AT TOP
 st.set_page_config(page_title="Buildings - Flat Tracker")
 
 st.title("🏠 Buildings")
@@ -39,8 +39,7 @@ else:
             st.session_state["building_name"] = b.get("name")
             st.switch_page("pages/2_Flats.py")
         if cols[2].button("Delete", key=f"del_{bid_str}"):
-            db = get_db()
-            db.flats.delete_many({"building_id": bid_str})
-            db.buildings.delete_one({"_id": b["_id"]})
+            delete_building(bid_str)   # USE THE CENTRALIZED CLEAN DELETE FUNCTION
             st.success("Building deleted.")
             st.rerun()
+

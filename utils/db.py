@@ -43,7 +43,7 @@ db = st.session_state["db"]
 buildings_col = db.buildings
 flats_col = db.flats
 monthly_bills_col = db.monthly_bills
-advances_col = db.advances        # Advance installments stored here
+advances_col = db.advances
 
 
 # ---------------------------------------------------------
@@ -65,6 +65,52 @@ def get_building(building_id):
     except:
         return None
 
+
+# def delete_building(building_id):
+#     """
+#     Completely delete a building and all linked flats, bills, and advances.
+#     FIXED: This now works correctly.
+#     """
+#     try:
+#         oid = ObjectId(building_id)
+#     except:
+#         return
+
+#     # Delete building
+#     buildings_col.delete_one({"_id": oid})
+
+#     # Delete all flats in this building
+#     flats = list(flats_col.find({"building_id": building_id}))
+#     flat_ids = [str(f["_id"]) for f in flats]
+
+#     flats_col.delete_many({"building_id": building_id})
+
+#     # Delete bills for those flats
+#     if flat_ids:
+#         monthly_bills_col.delete_many({"flat_id": {"$in": flat_ids}})
+#         advances_col.delete_many({"flat_id": {"$in": flat_ids}})
+
+
+
+def delete_building(building_id):
+    """Deletes building + all its flats + all bills + all advance payments."""
+    bid = str(building_id)
+
+    # Fetch all flats in this building
+    flats = list(flats_col.find({"building_id": bid}))
+
+    flat_ids = [str(f["_id"]) for f in flats]
+
+    # Delete flats
+    flats_col.delete_many({"building_id": bid})
+
+    # Delete bills of those flats
+    if flat_ids:
+        monthly_bills_col.delete_many({"flat_id": {"$in": flat_ids}})
+        advances_col.delete_many({"flat_id": {"$in": flat_ids}})
+
+    # Delete the building itself
+    buildings_col.delete_one({"_id": ObjectId(bid)})
 
 # ---------------------------------------------------------
 # FLAT HELPERS
@@ -93,14 +139,14 @@ def add_flat(
         "base_rent": float(base_rent) if base_rent else 0.0,
         "water_rate_per_liter": float(water_rate) if water_rate not in (None, "") else None,
         "tenant_history": [],
-        "total_advance": float(total_advance),     # FIXED TOTAL ADVANCE
+        "total_advance": float(total_advance),
         "created_at": datetime.utcnow().isoformat(),
     }
 
     res = flats_col.insert_one(flat_doc)
     fid = str(res.inserted_id)
 
-    # Add tenant history entry if tenant exists
+    # Add tenant entry if provided
     if tenant_name and move_in:
         entry = {
             "tenant_name": tenant_name,
@@ -130,7 +176,7 @@ def update_flat(flat_id, **kwargs):
     if update_doc:
         flats_col.update_one({"_id": ObjectId(flat_id)}, {"$set": update_doc})
 
-    # Sync monthly summary:
+    # Sync summary
     curr_month = datetime.now().month
     curr_year = datetime.now().year
     building_id = flats_col.find_one({"_id": ObjectId(flat_id)})["building_id"]
@@ -159,12 +205,12 @@ def add_tenant_entry(flat_id, tenant_name, move_in, phone=""):
 
 def vacate_current_tenant(flat_id, move_out_date=None):
     flat = flats_col.find_one({"_id": ObjectId(flat_id)})
+
     if not flat:
         return
 
     hist = flat.get("tenant_history", []) or []
 
-    # Find last active tenant entry
     for i in range(len(hist) - 1, -1, -1):
         if hist[i].get("move_out") is None:
             hist[i]["move_out"] = move_out_date or datetime.utcnow().isoformat()
@@ -178,6 +224,7 @@ def move_flat_to_history(flat_id):
     flats_col.delete_one({"_id": ObjectId(flat_id)})
     monthly_bills_col.delete_many({"flat_id": str(flat_id)})
     advances_col.delete_many({"flat_id": str(flat_id)})
+
 
 
 # ---------------------------------------------------------
@@ -246,10 +293,9 @@ def update_flat_monthly_summary(flat_id, building_id, month, year):
 
 
 # ---------------------------------------------------------
-# ADVANCE PAYMENT SYSTEM (FULLY FIXED)
+# ADVANCE PAYMENT SYSTEM
 # ---------------------------------------------------------
 def add_advance_payment(flat_id, amount):
-    """Adds a new installment of advance paid."""
     try:
         amount = float(amount)
     except:
@@ -267,8 +313,6 @@ def add_advance_payment(flat_id, amount):
 
 
 def get_advance_summary(flat_id):
-    """Returns (total, paid, remaining)."""
-
     flat = flats_col.find_one({"_id": ObjectId(flat_id)})
     if not flat:
         return 0, 0, 0

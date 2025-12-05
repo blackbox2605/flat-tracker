@@ -1,4 +1,4 @@
-#5_Building_Monthly_Summary.py
+# pages/5_Building_Monthly_Summary.py
 import streamlit as st
 from datetime import datetime
 from utils.db import get_buildings, get_flats_by_building, get_bill, save_bill
@@ -82,7 +82,6 @@ for f in flats:
 # Use filtered list instead of all flats
 flats = filtered_flats
 
-
 # Add an extra column for Misc
 col_widths = [1.2,1.4,1,1,1,1,1,1.2,1.2,1.2,1.0,1.2]  # added one width for misc (at index 10)
 headers = ["Flat","Tenant","Prev Cold","Curr Cold","Prev Hot","Curr Hot","Rate (₹/L)","Water ₹","Electricity ₹","Rent ₹","Misc ₹","Total Due ₹"]
@@ -148,8 +147,13 @@ for f in flats:
     elec_val      = r[8].number_input("", value=default_elec, key=k_elec)
     rent_val      = r[9].number_input("", value=default_rent, key=k_rent)
     misc_val      = r[10].number_input("", value=default_misc, key=k_misc)
+
+    # subtotal calculation
     subtotal = calc_total_payable(rent_val, water_charge, elec_val, misc_val)
-    total_due = subtotal + prev_carry
+
+    # FINAL: total_due shown to user = subtotal + prev_carry - paid (can be negative)
+    total_due = subtotal + prev_carry - default_paid
+
     r[11].markdown(f"**₹{total_due:.2f}**")
 
 st.write("---")
@@ -173,9 +177,15 @@ if st.button("💾 Save All Bills"):
 
         water_units, water_charge = calc_water_charge(prev_cold_val, curr_cold_val, prev_hot_val, curr_hot_val, rate_val)
         subtotal = calc_total_payable(rent_val, water_charge, elec_val, misc_val)
-        total_due = subtotal + prev_carry_val
-        pending = max(total_due - paid_val, 0)
-        carry_forward = max(paid_val - total_due, 0)
+
+        # 🔥 NEW LOGIC: total_due = subtotal + prev_carry - amount_paid  (can be negative)
+        total_due = subtotal + prev_carry_val - paid_val
+
+        # pending stores the final net due (can be negative)
+        pending = total_due
+
+        # keep previous carry_forward as-is (we're not deriving a new carry_forward from this month's payments)
+        carry_forward = prev_carry_val
 
         doc = {
             "flat_id": fid,
