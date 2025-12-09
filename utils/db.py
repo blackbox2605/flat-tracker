@@ -325,3 +325,5 @@ def get_advance_summary(flat_id):
     remaining = max(total_adv - paid, 0)
 
     return total_adv, paid, remaining
+
+

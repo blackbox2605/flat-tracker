@@ -145,8 +145,15 @@ else:
             col1, col2, col3 = st.columns(3)
 
             if col1.button("Open Billing", key=f"bl_{fid}"):
+                st.session_state["building_id"] = building_id
                 st.session_state["selected_flat_id"] = fid
+
+                # Use current month/year
+                st.session_state["billing_month"] = datetime.now().month
+                st.session_state["billing_year"] = datetime.now().year
+
                 st.switch_page("pages/3_Billing.py")
+
 
             if col2.button("Tenant History", key=f"th_{fid}"):
                 st.session_state["selected_flat_id"] = fid

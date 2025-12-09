@@ -1,10 +1,10 @@
 # pages/5_Building_Monthly_Summary.py
 import streamlit as st
+st.set_page_config(page_title="Building Monthly Summary", layout="wide")
 from datetime import datetime
 from utils.db import get_buildings, get_flats_by_building, get_bill, save_bill
 from utils.billing_utils import calc_water_charge, calc_total_payable
 
-st.set_page_config(page_title="Building Monthly Summary", layout="wide")
 st.title("🏘️ Building — Monthly Summary (Bulk Billing Edit)")
 
 def get_prev_month_year(month: int, year: int):
@@ -16,7 +16,56 @@ def safe_float(x, default=0.0):
     try: return float(x)
     except: return default
 
+# ----------------------------
+# Sticky header CSS
+# ----------------------------
+st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 1rem;
+    }
+    .sticky-header {
+        position: sticky;
+        top: 0rem;
+        background-color: #0d6efd;
+        color: white;
+        font-weight: bold;
+        z-index: 1000;
+        display: flex;
+        border-bottom: 2px solid #000;
+        margin-left: -1rem;
+        margin-right: -1rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+        height: 35px;
+        align-items: center;
+    }
+    .sticky-header span { text-align: center; padding: 0 5px; }
+    .sticky-header span:nth-child(1) { flex: 1.2; }
+    .sticky-header span:nth-child(2) { flex: 1.4; }
+    .sticky-header span:nth-child(3) { flex: 1.0; }
+    .sticky-header span:nth-child(4) { flex: 1.0; }
+    .sticky-header span:nth-child(5) { flex: 1.0; }
+    .sticky-header span:nth-child(6) { flex: 1.0; }
+    .sticky-header span:nth-child(7) { flex: 1.0; }
+    .sticky-header span:nth-child(8) { flex: 1.2; }
+    .sticky-header span:nth-child(9) { flex: 1.2; }
+    .sticky-header span:nth-child(10){ flex: 1.2; }
+    .sticky-header span:nth-child(11){ flex: 1.0; }
+    .sticky-header span:nth-child(12){ flex: 1.2; }
+
+    .stNumberInput div[data-baseweb="input"] input {
+        text-align: right !important;
+        font-size: 0.9em;
+    }
+    div[data-baseweb="input"] label { display: none; }
+    .stContainer { padding: 5px 0; margin-bottom: 5px; }
+    </style>
+""", unsafe_allow_html=True)
+
+# ----------------------------
 # Select building
+# ----------------------------
 buildings = get_buildings()
 if not buildings:
     st.info("No buildings found.")
@@ -41,56 +90,55 @@ if not flats:
     st.stop()
 
 # -------------------------------------------------------------
-# FILTER: Show only flats that are occupied in the selected month/year
+# FILTER occupied flats
 # -------------------------------------------------------------
 filtered_flats = []
-
 for f in flats:
     tenant_history = f.get("tenant_history", [])
     if not tenant_history:
         continue
 
-    # find latest active tenant (no move_out)
     latest = next((t for t in reversed(tenant_history) if not t.get("move_out")), None)
     if not latest:
         continue
 
     start = latest.get("move_in")
-    end   = latest.get("move_out")  # may be None
+    end   = latest.get("move_out")
 
     if not start:
         continue
 
-    # Parse dates
     start_dt = datetime.fromisoformat(start)
     end_dt = datetime.fromisoformat(end) if end else None
 
-    # Check if active during selected month
     is_active = (
         (start_dt.year < year or (start_dt.year == year and start_dt.month <= month))
         and
-        (
-            end_dt is None or
-            end_dt.year > year or
-            (end_dt.year == year and end_dt.month >= month)
-        )
+        (end_dt is None or end_dt.year > year or (end_dt.year == year and end_dt.month >= month))
     )
-
     if is_active:
         filtered_flats.append(f)
 
-# Use filtered list instead of all flats
 flats = filtered_flats
 
-# Add an extra column for Misc
-col_widths = [1.2,1.4,1,1,1,1,1,1.2,1.2,1.2,1.0,1.2]  # added one width for misc (at index 10)
+# ----------------------------
+# Header row
+# ----------------------------
+col_widths = [1.2,1.4,1,1,1,1,1,1.2,1.2,1.2,1.0,1.2]
 headers = ["Flat","Tenant","Prev Cold","Curr Cold","Prev Hot","Curr Hot","Rate (₹/L)","Water ₹","Electricity ₹","Rent ₹","Misc ₹","Total Due ₹"]
-cols = st.columns(col_widths)
-for c,h in zip(cols, headers): c.markdown(f"**{h}**")
-st.write("---")
+
+header_html = "<div class='sticky-header'>"
+for h in headers:
+    header_html += f"<span>{h}</span>"
+header_html += "</div>"
+
+st.markdown(header_html, unsafe_allow_html=True)
 
 flat_ids_in_order = []
 
+# ----------------------------
+# Tenant Rows
+# ----------------------------
 for f in flats:
     fid = str(f["_id"])
     flat_ids_in_order.append(fid)
@@ -125,40 +173,56 @@ for f in flats:
     k_paid      = f"paid__{fid}__{month}__{year}"
     k_misc      = f"misc__{fid}__{month}__{year}"
 
-    r = st.columns(col_widths)
+    st.write("---")
 
-    # Flat → Billing page
-    if r[0].button(flat_no, key=f"open_{fid}_{month}_{year}"):
-        st.session_state["building_id"] = building_id
-        st.session_state["selected_flat_id"] = fid
-        st.session_state["billing_month"] = int(month)
-        st.session_state["billing_year"] = int(year)
-        st.switch_page("pages/3_Billing.py")
+    with st.container(border=False):
 
-    r[1].write(curr_tenant)
+        r = st.columns(col_widths)
 
-    prev_cold_val = r[2].number_input("", value=default_prev_cold, key=k_prev_cold)
-    curr_cold_val = r[3].number_input("", value=default_curr_cold, key=k_curr_cold)
-    prev_hot_val  = r[4].number_input("", value=default_prev_hot, key=k_prev_hot)
-    curr_hot_val  = r[5].number_input("", value=default_curr_hot, key=k_curr_hot)
-    rate_val      = r[6].number_input("", value=default_rate, key=k_rate)
-    water_units, water_charge = calc_water_charge(prev_cold_val, curr_cold_val, prev_hot_val, curr_hot_val, rate_val)
-    r[7].write(f"₹{water_charge:.2f}")
-    elec_val      = r[8].number_input("", value=default_elec, key=k_elec)
-    rent_val      = r[9].number_input("", value=default_rent, key=k_rent)
-    misc_val      = r[10].number_input("", value=default_misc, key=k_misc)
+        # --------------------------
+        # FIXED INDENTATION STARTS
+        # --------------------------
 
-    # subtotal calculation
-    subtotal = calc_total_payable(rent_val, water_charge, elec_val, misc_val)
+        if r[0].button(flat_no, key=f"open_{fid}_{month}_{year}", use_container_width=True):
+            st.session_state["building_id"] = building_id
+            st.session_state["selected_flat_id"] = fid
+            st.session_state["billing_month"] = int(month)
+            st.session_state["billing_year"] = int(year)
+            st.switch_page("pages/3_Billing.py")
+            st.stop()
 
-    # FINAL: total_due shown to user = subtotal + prev_carry - paid (can be negative)
-    total_due = subtotal + prev_carry - default_paid
+        r[1].write(curr_tenant)
 
-    r[11].markdown(f"**₹{total_due:.2f}**")
+        prev_cold_val = r[2].number_input("", value=float(default_prev_cold), key=k_prev_cold, format="%.2f", label_visibility="collapsed")
+        curr_cold_val = r[3].number_input("", value=float(default_curr_cold), key=k_curr_cold, format="%.2f", label_visibility="collapsed")
+        prev_hot_val  = r[4].number_input("", value=float(default_prev_hot), key=k_prev_hot, format="%.2f", label_visibility="collapsed")
+        curr_hot_val  = r[5].number_input("", value=float(default_curr_hot), key=k_curr_hot, format="%.2f", label_visibility="collapsed")
+        rate_val      = r[6].number_input("", value=float(default_rate), key=k_rate, format="%.4f", label_visibility="collapsed")
+
+        water_units, water_charge = calc_water_charge(prev_cold_val, curr_cold_val, prev_hot_val, curr_hot_val, rate_val)
+        r[7].write(f"₹{water_charge:.2f}")
+
+        elec_val = r[8].number_input("", value=float(default_elec), key=k_elec, format="%.2f", label_visibility="collapsed")
+        rent_val = r[9].number_input("", value=float(default_rent), key=k_rent, format="%.2f", label_visibility="collapsed")
+        misc_val = r[10].number_input("", value=float(default_misc), key=k_misc, format="%.2f", label_visibility="collapsed")
+
+        r_paid = st.empty().number_input(f"Paid - Flat {fid}", value=float(default_paid), key=k_paid, format="%.2f", label_visibility="collapsed")
+        paid_val = r_paid
+
+        subtotal = calc_total_payable(rent_val, water_charge, elec_val, misc_val)
+        total_due = subtotal + prev_carry - paid_val
+
+        r[11].markdown(f"**₹{total_due:.2f}**")
+
+        # --------------------------
+        # FIXED INDENTATION ENDS
+        # --------------------------
 
 st.write("---")
 
+# ----------------------------
 # Save All
+# ----------------------------
 if st.button("💾 Save All Bills"):
     saved = 0
     for fid in flat_ids_in_order:
@@ -177,15 +241,10 @@ if st.button("💾 Save All Bills"):
 
         water_units, water_charge = calc_water_charge(prev_cold_val, curr_cold_val, prev_hot_val, curr_hot_val, rate_val)
         subtotal = calc_total_payable(rent_val, water_charge, elec_val, misc_val)
-
-        # 🔥 NEW LOGIC: total_due = subtotal + prev_carry - amount_paid  (can be negative)
         total_due = subtotal + prev_carry_val - paid_val
-
-        # pending stores the final net due (can be negative)
-        pending = total_due
-
-        # keep previous carry_forward as-is (we're not deriving a new carry_forward from this month's payments)
-        carry_forward = prev_carry_val
+        
+        pending = max(0, total_due) 
+        carry_forward = total_due 
 
         doc = {
             "flat_id": fid,
@@ -201,7 +260,6 @@ if st.button("💾 Save All Bills"):
             "water_charge": water_charge,
             "rent": rent_val,
             "electricity": elec_val,
-            # NEW: misc
             "misc": misc_val,
             "subtotal": subtotal,
             "prev_carry": prev_carry_val,
@@ -213,11 +271,8 @@ if st.button("💾 Save All Bills"):
         }
 
         save_bill(fid, building_id, month, year, doc)
-
-        # 🔥 Sync monthly summary (recalculate derived fields) after saving.
         from utils.db import update_flat_monthly_summary
         update_flat_monthly_summary(fid, building_id, month, year)
-
         saved += 1
 
     st.success(f"Saved {saved} bills successfully!")

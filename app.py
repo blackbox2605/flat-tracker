@@ -43,7 +43,7 @@
 #             db.flats.delete_many({"building_id": str(b["_id"])})
 #             st.rerun()
 
-
+#app.py
 import streamlit as st
 
 st.set_page_config(page_title="Bill Payments", layout="wide")

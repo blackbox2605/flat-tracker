@@ -24,6 +24,29 @@ if not building_id:
 st.title("📄 Billing")
 
 # --- Flat selection ---
+
+# flats = list(flats_col.find({"building_id": building_id}).sort("flat_no", 1))
+# if not flats:
+#     st.info("No flats found.")
+#     st.stop()
+
+# flat_map = {str(f["_id"]): f for f in flats}
+# options = {f"{f['flat_no']} ({f['bhk']}BHK)": str(f["_id"]) for f in flats}
+
+# selected_label = st.selectbox("Select flat", list(options.keys()))
+# selected_flat_id = options[selected_label]
+# st.session_state["selected_flat_id"] = selected_flat_id
+# flat = flat_map[selected_flat_id]
+
+# st.header(f"Flat {flat['flat_no']} — Billing")
+
+# # --- Month/Year ---
+# col1, col2 = st.columns(2)
+# month = col1.selectbox("Month", list(range(1, 13)), index=datetime.now().month - 1)
+# year = col2.number_input("Year", value=datetime.now().year, step=1)
+
+
+# --- Flat selection ---
 flats = list(flats_col.find({"building_id": building_id}).sort("flat_no", 1))
 if not flats:
     st.info("No flats found.")
@@ -32,17 +55,32 @@ if not flats:
 flat_map = {str(f["_id"]): f for f in flats}
 options = {f"{f['flat_no']} ({f['bhk']}BHK)": str(f["_id"]) for f in flats}
 
-selected_label = st.selectbox("Select flat", list(options.keys()))
+# Pre-select flat from session_state if available
+if "selected_flat_id" in st.session_state:
+    selected_flat_id = st.session_state["selected_flat_id"]
+    # Get label from flat_map
+    selected_label = next((lbl for lbl, fid in options.items() if fid == selected_flat_id), list(options.keys())[0])
+else:
+    selected_label = list(options.keys())[0]
+    selected_flat_id = options[selected_label]
+
+selected_label = st.selectbox("Select flat", list(options.keys()), index=list(options.keys()).index(selected_label))
 selected_flat_id = options[selected_label]
 st.session_state["selected_flat_id"] = selected_flat_id
 flat = flat_map[selected_flat_id]
 
-st.header(f"Flat {flat['flat_no']} — Billing")
-
 # --- Month/Year ---
 col1, col2 = st.columns(2)
-month = col1.selectbox("Month", list(range(1, 13)), index=datetime.now().month - 1)
-year = col2.number_input("Year", value=datetime.now().year, step=1)
+# Use session_state if available
+month_index = datetime.now().month - 1
+if "billing_month" in st.session_state:
+    month_index = st.session_state["billing_month"] - 1
+month = col1.selectbox("Month", list(range(1, 13)), index=month_index)
+
+year_value = datetime.now().year
+if "billing_year" in st.session_state:
+    year_value = st.session_state["billing_year"]
+year = col2.number_input("Year", value=year_value, step=1)
 
 # Check if bill already exists
 bill = monthly_bills_col.find_one({
