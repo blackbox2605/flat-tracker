@@ -431,7 +431,7 @@ if st.button("Save bill"):
     update_flat_monthly_summary(selected_flat_id, selected_building_id, int(month), int(year))
 
     st.success("Saved and summary updated!")
-    st.experimental_rerun()
+    st.rerun()
 
 # -------------------------------------------------------------------
 # PDF Export (uses reportlab if available)

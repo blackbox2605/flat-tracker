@@ -12,22 +12,45 @@
 #     move_flat_to_history,
 #     add_advance_payment,
 #     get_advance_summary,
+#     get_buildings,
 # )
 
 # st.set_page_config(page_title="Flats - Flat Tracker")
 # st.title("🏢 Flats — Manage Building")
 
-# if "building_id" not in st.session_state:
-#     st.error("No building selected. Go back to Buildings.")
+# # -------------------------------------------------------------------
+# # Select Building (Dropdown)
+# # -------------------------------------------------------------------
+# buildings = get_buildings()
+# if not buildings:
+#     st.error("No buildings found. Please add a building first.")
 #     st.stop()
 
-# building_id = st.session_state["building_id"]
-# building = get_building(building_id)
+# # Map for dropdown: name -> _id
+# building_map = {b["name"]: str(b["_id"]) for b in buildings}
 
+# # Pre-select building
+# selected_building_name = None
+# if "building_id" in st.session_state:
+#     selected_building_name = next(
+#         (name for name, bid in building_map.items() if bid == st.session_state["building_id"]),
+#         None
+#     )
+# if not selected_building_name:
+#     selected_building_name = list(building_map.keys())[0]
+
+# selected_building_name = st.selectbox("Select Building", list(building_map.keys()), index=list(building_map.keys()).index(selected_building_name))
+# building_id = building_map[selected_building_name]
+# st.session_state["building_id"] = building_id
+
+# building = get_building(building_id)
 # if not building:
 #     st.error("Building not found.")
 #     st.stop()
 
+# # -------------------------------------------------------------------
+# # Header and Navigation
+# # -------------------------------------------------------------------
 # st.header(f"{building.get('name')}")
 # colA, colB = st.columns(2)
 # if colA.button("⬅ Back to Buildings"):
@@ -37,7 +60,9 @@
 
 # st.write("---")
 
+# # -------------------------------------------------------------------
 # # Add flat
+# # -------------------------------------------------------------------
 # with st.expander("➕ Add new flat"):
 #     with st.form("add_flat"):
 #         flat_no = st.text_input("Flat No")
@@ -64,7 +89,7 @@
 #                 water_rate if water_rate > 0 else None,
 #                 tenant_name if tenant_name else None,
 #                 move_in.isoformat() if tenant_name else None,
-#                 total_advance=total_advance,  # <-- ADDED
+#                 total_advance=total_advance,
 #             )
 
 #             if total_advance > 0 and initial_paid > 0:
@@ -75,7 +100,9 @@
 
 # st.write("---")
 
-# # List flats
+# # -------------------------------------------------------------------
+# # List flats (filtered by selected building)
+# # -------------------------------------------------------------------
 # flats = get_flats_by_building(building_id)
 
 # if not flats:
@@ -115,7 +142,7 @@
 
 #                 assign_name = st.text_input("New Tenant Name")
 #                 assign_phone = st.text_input("Tenant Phone")
-#                 assign_movein = st.date_input("Tenant Move-in Date", value=datetime.today())
+#                 assign_movein = st.date_input("Tenant Move-in Date", value=move_in)
 
 #                 vac_chk = st.checkbox("Vacate current tenant")
 
@@ -147,13 +174,9 @@
 #             if col1.button("Open Billing", key=f"bl_{fid}"):
 #                 st.session_state["building_id"] = building_id
 #                 st.session_state["selected_flat_id"] = fid
-
-#                 # Use current month/year
 #                 st.session_state["billing_month"] = datetime.now().month
 #                 st.session_state["billing_year"] = datetime.now().year
-
 #                 st.switch_page("pages/3_Billing.py")
-
 
 #             if col2.button("Tenant History", key=f"th_{fid}"):
 #                 st.session_state["selected_flat_id"] = fid
@@ -163,8 +186,6 @@
 #                 move_flat_to_history(fid)
 #                 st.success("Tenant moved to history.")
 #                 st.rerun()
-
-
 
 
 # pages/2_Flats.py
@@ -182,6 +203,7 @@ from utils.db import (
     add_advance_payment,
     get_advance_summary,
     get_buildings,
+    update_current_tenant,
 )
 
 st.set_page_config(page_title="Flats - Flat Tracker")
@@ -208,7 +230,11 @@ if "building_id" in st.session_state:
 if not selected_building_name:
     selected_building_name = list(building_map.keys())[0]
 
-selected_building_name = st.selectbox("Select Building", list(building_map.keys()), index=list(building_map.keys()).index(selected_building_name))
+selected_building_name = st.selectbox(
+    "Select Building",
+    list(building_map.keys()),
+    index=list(building_map.keys()).index(selected_building_name)
+)
 building_id = building_map[selected_building_name]
 st.session_state["building_id"] = building_id
 
@@ -283,6 +309,11 @@ else:
         th = f.get("tenant_history", [])
         curr = next((x for x in reversed(th) if not x.get("move_out")), None)
 
+        # get move-in date of current tenant if exists
+        current_movein = datetime.today()
+        if curr and "move_in" in curr:
+            current_movein = datetime.fromisoformat(curr["move_in"]).date()
+
         header = f"Flat {f['flat_no']} — {f['bhk']}BHK"
         if curr:
             header += f" — Tenant: {curr['tenant_name']}"
@@ -309,9 +340,9 @@ else:
                 new_rent = st.number_input("Base Rent", value=f.get("base_rent", 0.0))
                 new_rate = st.number_input("Water Rate", value=f.get("water_rate_per_liter") or 0.0)
 
-                assign_name = st.text_input("New Tenant Name")
-                assign_phone = st.text_input("Tenant Phone")
-                assign_movein = st.date_input("Tenant Move-in Date", value=datetime.today())
+                assign_name = st.text_input("New Tenant Name", value=curr["tenant_name"] if curr else "")
+                assign_phone = st.text_input("Tenant Phone", value=curr["phone"] if curr else "")
+                assign_movein = st.date_input("Tenant Move-in Date", value=current_movein)
 
                 vac_chk = st.checkbox("Vacate current tenant")
 
@@ -324,16 +355,17 @@ else:
                     curr_month, curr_year = datetime.now().month, datetime.now().year
                     update_flat_monthly_summary(fid, building_id, curr_month, curr_year)
 
+                    # Update current tenant
+                    if curr:
+                        update_current_tenant(
+                            fid,
+                            tenant_name=assign_name if assign_name else None,
+                            move_in=assign_movein.isoformat(),
+                            phone=assign_phone if assign_phone else None
+                        )
+
                     if vac_chk:
                         vacate_current_tenant(fid, assign_movein.isoformat())
-
-                    if assign_name:
-                        add_tenant_entry(
-                            fid,
-                            assign_name,
-                            assign_movein.isoformat(),
-                            assign_phone,
-                        )
 
                     st.success("Updated.")
                     st.rerun()
