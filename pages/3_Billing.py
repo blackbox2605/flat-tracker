@@ -567,9 +567,25 @@ else:
 # -------------------------------------------------------------------
 # Back
 # -------------------------------------------------------------------
-if st.button("⬅ Back to Flats"):
-    # keep building_id in session so flats page displays that building
-    st.session_state["building_id"] = selected_building_id
-    st.experimental_set_query_params()  # ensure navigation clean
-    st.experimental_rerun()
+# if st.button("⬅ Back to Flats"):
+#     # keep building_id in session so flats page displays that building
+#     st.session_state["building_id"] = selected_building_id
+#     st.experimental_set_query_params()  # ensure navigation clean
+#     st.experimental_rerun()
     # st.switch_page("pages/2_Flats.py")  # old approach — rerun ensures state kept
+# Use a unique key for the button to avoid duplicate widget IDs
+if st.button("⬅ Back to Flats", key="back_to_flats"):
+    # keep building_id in session so flats page displays that building
+    # Use the correct variable name that is present in this file. If you have 'building_id'
+    # use that; otherwise use the variable you actually defined (e.g. selected_building_id).
+    st.session_state["building_id"] = building_id
+
+    # optional: clear query params so navigation is clean (ok to keep)
+    try:
+        st.experimental_set_query_params()
+    except Exception:
+        # harmless if Streamlit version doesn't support it
+        pass
+
+    # modern rerun call
+    st.rerun()

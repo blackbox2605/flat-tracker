@@ -92,31 +92,76 @@ if not flats:
 # -------------------------------------------------------------
 # FILTER occupied flats
 # -------------------------------------------------------------
+# filtered_flats = []
+# for f in flats:
+#     tenant_history = f.get("tenant_history", [])
+#     if not tenant_history:
+#         continue
+
+#     latest = next((t for t in reversed(tenant_history) if not t.get("move_out")), None)
+#     if not latest:
+#         continue
+
+#     start = latest.get("move_in")
+#     end   = latest.get("move_out")
+
+#     if not start:
+#         continue
+
+#     start_dt = datetime.fromisoformat(start)
+#     end_dt = datetime.fromisoformat(end) if end else None
+
+#     is_active = (
+#         (start_dt.year < year or (start_dt.year == year and start_dt.month <= month))
+#         and
+#         (end_dt is None or end_dt.year > year or (end_dt.year == year and end_dt.month >= month))
+#     )
+#     if is_active:
+#         filtered_flats.append(f)
+
+# flats = filtered_flats
+
+
+# -------------------------------------------------------------
+# FILTER occupied flats (improved logic)
+# -------------------------------------------------------------
 filtered_flats = []
+
+from datetime import timedelta
+
+# Month start and end
+month_start = datetime(year, month, 1)
+
+if month == 12:
+    month_end = datetime(year + 1, 1, 1) - timedelta(days=1)
+else:
+    month_end = datetime(year, month + 1, 1) - timedelta(days=1)
+
 for f in flats:
     tenant_history = f.get("tenant_history", [])
     if not tenant_history:
         continue
 
-    latest = next((t for t in reversed(tenant_history) if not t.get("move_out")), None)
-    if not latest:
-        continue
+    latest_active = None
 
-    start = latest.get("move_in")
-    end   = latest.get("move_out")
+    # Check from latest to earliest
+    for t in reversed(tenant_history):
+        move_in = t.get("move_in")
+        move_out = t.get("move_out")
 
-    if not start:
-        continue
+        if not move_in:
+            continue
 
-    start_dt = datetime.fromisoformat(start)
-    end_dt = datetime.fromisoformat(end) if end else None
+        move_in_dt = datetime.fromisoformat(move_in)
+        move_out_dt = datetime.fromisoformat(move_out) if move_out else None
 
-    is_active = (
-        (start_dt.year < year or (start_dt.year == year and start_dt.month <= month))
-        and
-        (end_dt is None or end_dt.year > year or (end_dt.year == year and end_dt.month >= month))
-    )
-    if is_active:
+        # ACTIVE IF:
+        # move_in <= month_end AND (no move_out OR move_out >= month_start)
+        if move_in_dt <= month_end and (move_out_dt is None or move_out_dt >= month_start):
+            latest_active = t
+            break
+
+    if latest_active:
         filtered_flats.append(f)
 
 flats = filtered_flats
